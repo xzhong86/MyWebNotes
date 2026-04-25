@@ -19,7 +19,8 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const NOTE_FILE = path.join(DATA_DIR, "note.json");
-const ACCESS_KEY_FILE = process.env.ACCESS_KEY_PATH ?? path.join(DATA_DIR, "access-key.txt");
+const DEFAULT_KEY_DIR = path.join(__dirname, "config");
+const ACCESS_KEY_FILE = process.env.ACCESS_KEY_PATH ?? path.join(DEFAULT_KEY_DIR, "access-key.txt");
 
 const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? 8080);
@@ -146,6 +147,7 @@ function ensureDataFiles() {
 }
 
 function getOrCreateAccessKey() {
+  fs.mkdirSync(path.dirname(ACCESS_KEY_FILE), { recursive: true });
   if (fs.existsSync(ACCESS_KEY_FILE)) {
     const value = fs.readFileSync(ACCESS_KEY_FILE, "utf8").trim();
     if (value.length >= 16) {

@@ -17,9 +17,21 @@ npm start
 
 首次启动会自动生成访问密钥文件：
 
-`data/access-key.txt`
+`config/access-key.txt`
 
 你可以通过 SSH 进入服务器后读取该文件，将密钥输入网页进行解锁。
+
+也可通过环境变量自定义路径：
+
+`ACCESS_KEY_PATH=/path/to/access-key.txt npm start`
+
+## 迁移提示
+
+若你之前已经在其他位置生成过密钥文件，建议：
+
+1. 关闭服务后确认旧路径密钥是否还在使用
+2. 重新启动服务自动生成 `config/access-key.txt`
+3. 使用新密钥重新登录
 
 ## 2. 安全模型
 
