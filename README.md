@@ -1,4 +1,4 @@
-# Secure Note Sync (MVP)
+# Simple Secure Notes (BruceZ的简易Web云便签)
 
 一个轻量的跨设备私密便签 Demo，目标是：
 
