@@ -9,6 +9,11 @@ const saveBtn = document.getElementById("save-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const lockBtn = document.getElementById("lock-btn");
 const currentUserEl = document.getElementById("current-user");
+const createNoteBtn = document.getElementById("create-note-btn");
+const deleteNoteBtn = document.getElementById("delete-note-btn");
+const noteListEl = document.getElementById("note-list");
+const noteTitleEl = document.getElementById("note-title");
+const noteMetaEl = document.getElementById("note-meta");
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -18,6 +23,9 @@ let authCryptoKey = null;
 let encCryptoKey = null;
 let unlocked = false;
 let currentUser = null;
+let notesMeta = [];
+let activeNote = null;
+let activeNoteId = null;
 
 init().catch((error) => {
   setStatus(unlockStatus, `初始化失败: ${error.message}`, true);
@@ -38,31 +46,66 @@ unlockBtn.addEventListener("click", async () => {
     setStatus(unlockStatus, `解锁成功，欢迎 ${currentUser.username}。`, false, true);
     unlockCard.classList.add("hidden");
     noteCard.classList.remove("hidden");
-    await loadNote();
+    await loadNotesAndSelect();
   } catch (error) {
     setStatus(unlockStatus, `解锁失败: ${error.message}`, true);
   }
 });
 
-saveBtn.addEventListener("click", async () => {
+createNoteBtn.addEventListener("click", async () => {
   if (!unlocked) return;
+  try {
+    setStatus(noteStatus, "正在创建便签...");
+    const payload = await authedPost("/api/notes/create", {});
+    await loadNotesAndSelect(payload.note.id);
+    setStatus(noteStatus, "已创建新便签。", false, true);
+  } catch (error) {
+    setStatus(noteStatus, `创建失败: ${error.message}`, true);
+  }
+});
+
+saveBtn.addEventListener("click", async () => {
+  if (!unlocked || !activeNoteId) return;
   try {
     setStatus(noteStatus, "保存中...");
     const encrypted = await encryptText(noteText.value);
-    await authedPost("/api/note/put", {
+    const payload = await authedPost("/api/notes/put", {
+      noteId: activeNoteId,
       ciphertext: encrypted.ciphertext,
       iv: encrypted.iv,
       updatedAt: Date.now()
     });
+    activeNote = payload.note;
+    updateMetaFromActiveNote();
+    await loadNotesAndSelect(activeNoteId);
     setStatus(noteStatus, "保存成功。", false, true);
   } catch (error) {
     setStatus(noteStatus, `保存失败: ${error.message}`, true);
   }
 });
 
+deleteNoteBtn.addEventListener("click", async () => {
+  if (!unlocked || !activeNoteId) return;
+  const confirmed = window.confirm("确认删除当前便签？此操作不可恢复。");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await authedPost("/api/notes/delete", { noteId: activeNoteId });
+    const removedId = activeNoteId;
+    activeNote = null;
+    activeNoteId = null;
+    await loadNotesAndSelect();
+    setStatus(noteStatus, `便签已删除 (${removedId.slice(0, 8)})`, false, true);
+  } catch (error) {
+    setStatus(noteStatus, `删除失败: ${error.message}`, true);
+  }
+});
+
 refreshBtn.addEventListener("click", async () => {
   if (!unlocked) return;
-  await loadNote();
+  await loadNotesAndSelect(activeNoteId);
 });
 
 lockBtn.addEventListener("click", () => {
@@ -70,9 +113,16 @@ lockBtn.addEventListener("click", () => {
   authCryptoKey = null;
   encCryptoKey = null;
   currentUser = null;
+  notesMeta = [];
+  activeNote = null;
+  activeNoteId = null;
   currentUserEl.textContent = "-";
   noteText.value = "";
   accessKeyInput.value = "";
+  noteListEl.innerHTML = "";
+  noteTitleEl.textContent = "未选择便签";
+  noteMetaEl.textContent = "创建时间：- | 最近修改：-";
+  setEditorEnabled(false);
   noteCard.classList.add("hidden");
   unlockCard.classList.remove("hidden");
   setStatus(unlockStatus, "已锁定。");
@@ -85,7 +135,7 @@ async function init() {
     throw new Error("无法读取服务器配置");
   }
   config = await resp.json();
-  setStatus(unlockStatus, "输入访问密钥后可读取便签。");
+  setStatus(unlockStatus, "输入访问密钥后可读取便签。", false, false);
 }
 
 async function deriveKeys(accessKey) {
@@ -123,25 +173,95 @@ async function deriveKeys(accessKey) {
   return authedPost("/api/me", {});
 }
 
-async function loadNote() {
+async function loadNotesAndSelect(preferredNoteId = null) {
   try {
-    setStatus(noteStatus, "拉取最新内容...");
-    const payload = await authedPost("/api/note/get", {});
-    if (!payload.note?.ciphertext) {
+    setStatus(noteStatus, "拉取便签列表...");
+    const payload = await authedPost("/api/notes/list", {});
+    notesMeta = Array.isArray(payload.notes) ? payload.notes : [];
+    renderNoteList();
+
+    if (notesMeta.length === 0) {
+      activeNote = null;
+      activeNoteId = null;
       noteText.value = "";
-      setStatus(noteStatus, "当前还没有保存内容。");
+      noteTitleEl.textContent = "未选择便签";
+      noteMetaEl.textContent = "创建时间：- | 最近修改：-";
+      setEditorEnabled(false);
+      setStatus(noteStatus, "当前没有便签，请先点击“新增”。", false, false);
       return;
     }
-    const plaintext = await decryptText({
-      ciphertext: payload.note.ciphertext,
-      iv: payload.note.iv
-    });
-    noteText.value = plaintext;
-    const date = new Date(payload.note.updatedAt || 0);
-    setStatus(noteStatus, `已同步，更新时间: ${date.toLocaleString()}`, false, true);
+
+    const target = notesMeta.some((x) => x.id === preferredNoteId)
+      ? preferredNoteId
+      : notesMeta[0].id;
+    await openNote(target);
   } catch (error) {
     setStatus(noteStatus, `同步失败: ${error.message}`, true);
   }
+}
+
+function renderNoteList() {
+  noteListEl.innerHTML = "";
+
+  for (let i = 0; i < notesMeta.length; i += 1) {
+    const note = notesMeta[i];
+    const item = document.createElement("li");
+    item.className = `note-item ${note.id === activeNoteId ? "active" : ""}`;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "note-select";
+    btn.dataset.noteId = note.id;
+    btn.innerHTML = `<span class="note-name">便签 ${i + 1}</span>
+      <span class="note-time">创建: ${formatTs(note.createdAt)}</span>
+      <span class="note-time">修改: ${formatTs(note.updatedAt)}</span>`;
+    btn.addEventListener("click", () => {
+      openNote(note.id);
+    });
+
+    item.appendChild(btn);
+    noteListEl.appendChild(item);
+  }
+}
+
+async function openNote(noteId) {
+  if (!noteId) {
+    return;
+  }
+  try {
+    const payload = await authedPost("/api/notes/get", { noteId });
+    const note = payload.note;
+    const plaintext = note.ciphertext
+      ? await decryptText({ ciphertext: note.ciphertext, iv: note.iv })
+      : "";
+
+    activeNote = note;
+    activeNoteId = note.id;
+    noteText.value = plaintext;
+    setEditorEnabled(true);
+    updateMetaFromActiveNote();
+    renderNoteList();
+    setStatus(noteStatus, `已打开便签，最近修改: ${formatTs(note.updatedAt)}`, false, true);
+  } catch (error) {
+    setStatus(noteStatus, `读取便签失败: ${error.message}`, true);
+  }
+}
+
+function updateMetaFromActiveNote() {
+  if (!activeNote) {
+    noteTitleEl.textContent = "未选择便签";
+    noteMetaEl.textContent = "创建时间：- | 最近修改：-";
+    return;
+  }
+  const idx = notesMeta.findIndex((x) => x.id === activeNote.id);
+  noteTitleEl.textContent = idx >= 0 ? `便签 ${idx + 1}` : "便签";
+  noteMetaEl.textContent = `创建时间：${formatTs(activeNote.createdAt)} | 最近修改：${formatTs(activeNote.updatedAt)}`;
+}
+
+function setEditorEnabled(enabled) {
+  noteText.disabled = !enabled;
+  saveBtn.disabled = !enabled;
+  deleteNoteBtn.disabled = !enabled;
 }
 
 async function authedPost(path, body) {
@@ -224,6 +344,11 @@ function fromBase64(value) {
     out[i] = raw.charCodeAt(i);
   }
   return out;
+}
+
+function formatTs(ts) {
+  if (!ts) return "-";
+  return new Date(ts).toLocaleString();
 }
 
 function setStatus(el, message, isError = false, isSuccess = false) {

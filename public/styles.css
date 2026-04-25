@@ -26,15 +26,15 @@ body {
 }
 
 .app-shell {
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 32px 18px;
+  padding: 28px 16px;
 }
 
 .card {
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 18px;
+  padding: 16px;
   background: var(--card);
   box-shadow: 0 10px 30px rgba(31, 48, 77, 0.08);
 }
@@ -45,12 +45,12 @@ body {
 
 h1,
 h2 {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
 }
 
 .identity {
-  margin: -4px 0 0;
+  margin: -2px 0 0;
   color: var(--muted);
   font-size: 13px;
 }
@@ -77,7 +77,7 @@ textarea {
 
 textarea {
   margin-top: 8px;
-  min-height: 54vh;
+  min-height: 58vh;
   resize: vertical;
   line-height: 1.45;
 }
@@ -85,7 +85,7 @@ textarea {
 button {
   border: none;
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   color: #fff;
   background: var(--accent);
   cursor: pointer;
@@ -95,8 +95,93 @@ button:hover {
   background: var(--accent-strong);
 }
 
+button:disabled {
+  background: #8a96a8;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: #c73f3f;
+}
+
+button.danger:hover {
+  background: #a93333;
+}
+
 #unlock-btn {
   margin-top: 10px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 14px;
+}
+
+.notes-pane {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfcff;
+}
+
+.list-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.note-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  max-height: 64vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-item {
+  margin: 0;
+}
+
+.note-select {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-select:hover {
+  background: #eef4ff;
+}
+
+.note-item.active .note-select {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.15);
+}
+
+.note-name {
+  font-weight: 600;
+}
+
+.note-time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-pane {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
 }
 
 .toolbar {
@@ -131,13 +216,23 @@ button:hover {
   color: var(--ok);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 920px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .note-list {
+    max-height: 36vh;
+  }
+}
+
+@media (max-width: 640px) {
   .app-shell {
-    padding: 16px 12px;
+    padding: 12px;
   }
 
   .card {
-    padding: 14px;
+    padding: 12px;
   }
 
   .toolbar {
@@ -145,11 +240,13 @@ button:hover {
     align-items: stretch;
   }
 
-  .toolbar-actions {
+  .toolbar-actions,
+  .list-actions {
     width: 100%;
   }
 
-  .toolbar-actions button {
+  .toolbar-actions button,
+  .list-actions button {
     flex: 1;
   }
 }

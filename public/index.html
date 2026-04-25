@@ -18,19 +18,34 @@
       </section>
 
       <section class="card hidden" id="note-card">
-        <div class="toolbar">
-          <div>
-            <h2>私密便签</h2>
-            <p class="identity">当前用户：<strong id="current-user">-</strong></p>
-          </div>
-          <div class="toolbar-actions">
-            <button id="refresh-btn" type="button">刷新</button>
-            <button id="save-btn" type="button">保存</button>
-            <button id="lock-btn" type="button">锁定</button>
-          </div>
+        <div class="workspace">
+          <aside class="notes-pane">
+            <div>
+              <h2>我的便签</h2>
+              <p class="identity">当前用户：<strong id="current-user">-</strong></p>
+            </div>
+            <div class="list-actions">
+              <button id="create-note-btn" type="button">新增</button>
+              <button id="refresh-btn" type="button">刷新</button>
+              <button id="lock-btn" type="button">锁定</button>
+            </div>
+            <ul id="note-list" class="note-list"></ul>
+          </aside>
+          <section class="editor-pane">
+            <div class="toolbar">
+              <div>
+                <h2 id="note-title">未选择便签</h2>
+                <p id="note-meta" class="identity">创建时间：- | 最近修改：-</p>
+              </div>
+              <div class="toolbar-actions">
+                <button id="delete-note-btn" type="button" class="danger">删除</button>
+                <button id="save-btn" type="button">保存</button>
+              </div>
+            </div>
+            <textarea id="note-text" placeholder="输入便签内容..." disabled></textarea>
+            <p id="note-status" class="status"></p>
+          </section>
         </div>
-        <textarea id="note-text" placeholder="输入便签内容..."></textarea>
-        <p id="note-status" class="status"></p>
       </section>
     </main>
 

@@ -1,4 +1,5 @@
 import { createServer, STATUS_CODES } from "node:http";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,19 +93,69 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
-  if (pathname === "/api/note/get" && req.method === "POST") {
+  if (pathname === "/api/notes/list" && req.method === "POST") {
     const rawBody = await readBody(req);
     const auth = authorizeRequest(req, pathname, rawBody);
     if (!auth) {
       sendJson(res, 401, { error: "Unauthorized" });
       return;
     }
-    const note = readNoteForUser(auth.user.id);
+    const notes = readNotesForUser(auth.user.id);
+    sendJson(res, 200, { notes: summarizeNotes(notes) });
+    return;
+  }
+
+  if (pathname === "/api/notes/get" && req.method === "POST") {
+    const rawBody = await readBody(req);
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
+      sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawBody || "{}");
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON payload" });
+      return;
+    }
+
+    if (typeof parsed.noteId !== "string" || !parsed.noteId) {
+      sendJson(res, 400, { error: "Missing or invalid fields" });
+      return;
+    }
+    const note = readNoteById(auth.user.id, parsed.noteId);
+    if (!note) {
+      sendJson(res, 404, { error: "Note not found" });
+      return;
+    }
     sendJson(res, 200, { note });
     return;
   }
 
-  if (pathname === "/api/note/put" && req.method === "POST") {
+  if (pathname === "/api/notes/create" && req.method === "POST") {
+    const rawBody = await readBody(req);
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
+      sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+    const now = Date.now();
+    const note = {
+      id: randomUUID(),
+      ciphertext: "",
+      iv: "",
+      createdAt: now,
+      updatedAt: now,
+      version: 0
+    };
+    createNoteForUser(auth.user.id, note);
+    sendJson(res, 200, { note });
+    return;
+  }
+
+  if (pathname === "/api/notes/put" && req.method === "POST") {
     const rawBody = await readBody(req);
     const auth = authorizeRequest(req, pathname, rawBody);
     if (!auth) {
@@ -121,6 +172,8 @@ async function handleApi(req, res, pathname) {
     }
 
     if (
+      typeof parsed.noteId !== "string" ||
+      !parsed.noteId ||
       typeof parsed.ciphertext !== "string" ||
       typeof parsed.iv !== "string" ||
       typeof parsed.updatedAt !== "number"
@@ -134,16 +187,51 @@ async function handleApi(req, res, pathname) {
       return;
     }
 
-    const current = readNoteForUser(auth.user.id);
+    const current = readNoteById(auth.user.id, parsed.noteId);
+    if (!current) {
+      sendJson(res, 404, { error: "Note not found" });
+      return;
+    }
     const next = {
+      ...current,
       ciphertext: parsed.ciphertext,
       iv: parsed.iv,
       updatedAt: parsed.updatedAt,
       version: current.version + 1
     };
 
-    writeNoteForUser(auth.user.id, next);
+    updateNoteForUser(auth.user.id, next);
     sendJson(res, 200, { note: next });
+    return;
+  }
+
+  if (pathname === "/api/notes/delete" && req.method === "POST") {
+    const rawBody = await readBody(req);
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
+      sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawBody || "{}");
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON payload" });
+      return;
+    }
+
+    if (typeof parsed.noteId !== "string" || !parsed.noteId) {
+      sendJson(res, 400, { error: "Missing or invalid fields" });
+      return;
+    }
+
+    const deleted = deleteNoteForUser(auth.user.id, parsed.noteId);
+    if (!deleted) {
+      sendJson(res, 404, { error: "Note not found" });
+      return;
+    }
+    sendJson(res, 200, { success: true });
     return;
   }
 
@@ -248,19 +336,111 @@ function readNotesDb() {
   return parsed;
 }
 
-function emptyNote() {
-  return { ciphertext: "", iv: "", updatedAt: 0, version: 0 };
+function readNotesForUser(userId) {
+  const notesDb = readNotesDb();
+  const normalized = normalizeUserNotes(notesDb.byUser[userId], userId);
+  if (normalized.changed) {
+    notesDb.byUser[userId] = normalized.value;
+    fs.writeFileSync(NOTES_FILE, JSON.stringify(notesDb, null, 2), "utf8");
+  }
+  return normalized.value.notes;
 }
 
-function readNoteForUser(userId) {
+function writeNotesForUser(userId, notes) {
   const notesDb = readNotesDb();
-  return notesDb.byUser[userId] ?? emptyNote();
-}
-
-function writeNoteForUser(userId, note) {
-  const notesDb = readNotesDb();
-  notesDb.byUser[userId] = note;
+  notesDb.byUser[userId] = { notes };
   fs.writeFileSync(NOTES_FILE, JSON.stringify(notesDb, null, 2), "utf8");
+}
+
+function readNoteById(userId, noteId) {
+  const notes = readNotesForUser(userId);
+  return notes.find((x) => x.id === noteId) ?? null;
+}
+
+function createNoteForUser(userId, note) {
+  const notes = readNotesForUser(userId);
+  notes.push(note);
+  writeNotesForUser(userId, notes);
+}
+
+function updateNoteForUser(userId, note) {
+  const notes = readNotesForUser(userId);
+  const idx = notes.findIndex((x) => x.id === note.id);
+  if (idx < 0) {
+    return false;
+  }
+  notes[idx] = note;
+  writeNotesForUser(userId, notes);
+  return true;
+}
+
+function deleteNoteForUser(userId, noteId) {
+  const notes = readNotesForUser(userId);
+  const idx = notes.findIndex((x) => x.id === noteId);
+  if (idx < 0) {
+    return false;
+  }
+  notes.splice(idx, 1);
+  writeNotesForUser(userId, notes);
+  return true;
+}
+
+function summarizeNotes(notes) {
+  return [...notes]
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .map((note) => ({
+      id: note.id,
+      createdAt: note.createdAt || 0,
+      updatedAt: note.updatedAt || 0
+    }));
+}
+
+function normalizeUserNotes(value, userId) {
+  if (!value || typeof value !== "object") {
+    return { changed: true, value: { notes: [] } };
+  }
+  if (Array.isArray(value.notes)) {
+    const notes = value.notes.filter(isValidNoteRecord);
+    return { changed: notes.length !== value.notes.length, value: { notes } };
+  }
+  if (
+    typeof value.ciphertext === "string" &&
+    typeof value.iv === "string" &&
+    typeof value.updatedAt === "number"
+  ) {
+    if (!value.ciphertext) {
+      return { changed: true, value: { notes: [] } };
+    }
+    return {
+      changed: true,
+      value: {
+        notes: [
+          {
+            id: `legacy-${userId}`,
+            ciphertext: value.ciphertext,
+            iv: value.iv,
+            createdAt: value.updatedAt || Date.now(),
+            updatedAt: value.updatedAt || Date.now(),
+            version: value.version || 1
+          }
+        ]
+      }
+    };
+  }
+  return { changed: true, value: { notes: [] } };
+}
+
+function isValidNoteRecord(note) {
+  return (
+    note &&
+    typeof note === "object" &&
+    typeof note.id === "string" &&
+    typeof note.ciphertext === "string" &&
+    typeof note.iv === "string" &&
+    typeof note.createdAt === "number" &&
+    typeof note.updatedAt === "number" &&
+    typeof note.version === "number"
+  );
 }
 
 function cleanupExpiredNonces() {
