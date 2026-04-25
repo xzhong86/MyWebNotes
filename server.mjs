@@ -387,7 +387,7 @@ function deleteNoteForUser(userId, noteId) {
 
 function summarizeNotes(notes) {
   return [...notes]
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .map((note) => ({
       id: note.id,
       createdAt: note.createdAt || 0,
