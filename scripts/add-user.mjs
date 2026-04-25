@@ -14,7 +14,8 @@ const username = args.username;
 const accessKey = args.accessKey || randomBytes(32).toString("hex");
 
 if (!username) {
-  console.error("Usage: node scripts/add-user.mjs --username <name> [--access-key <key>]");
+  console.error("Usage: node scripts/add-user.mjs -u <name> [-k <key>]");
+  console.error("Also supported: --username / --access-key");
   process.exit(1);
 }
 

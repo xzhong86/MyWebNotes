@@ -7,6 +7,8 @@
     "start": "node server.mjs",
     "add-user": "node scripts/add-user.mjs",
     "user:add": "node scripts/add-user.mjs",
+    "del-user": "node scripts/del-user.mjs",
+    "user:del": "node scripts/del-user.mjs",
     "test": "node --test"
   }
 }

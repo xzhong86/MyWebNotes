@@ -21,7 +21,7 @@ npm start
 首次使用请在服务器上添加用户：
 
 ```bash
-npm run user:add -- --username alice
+node scripts/add-user.mjs -u alice
 ```
 
 会输出该用户的 access-key（只显示一次），将它提供给用户登录网页即可。
@@ -29,10 +29,30 @@ npm run user:add -- --username alice
 可选：手动指定密钥
 
 ```bash
-npm run user:add -- --username alice --access-key "your_custom_key"
+node scripts/add-user.mjs -u alice -k "your_custom_key"
 ```
 
-注意：不要执行 `npm add-user`（这是 npm 自带账号命令），本项目请使用 `npm run user:add`。
+也可以使用 npm 脚本别名：
+
+```bash
+npm run user:add -- -u alice
+```
+
+注意：不要执行 `npm add-user`（这是 npm 自带账号命令）。
+
+删除用户（会同步删除该用户便签）：
+
+```bash
+node scripts/del-user.mjs -u alice
+```
+
+删除时会二次确认，必须输入 `DELETE` 才会执行。
+
+也可以使用 npm 脚本别名：
+
+```bash
+npm run user:del -- -u alice
+```
 
 也可通过环境变量自定义路径：
 
