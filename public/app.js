@@ -12,6 +12,7 @@ const notesStreamEl = document.getElementById("notes-stream");
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+const ACCESS_KEY_STORAGE = "ssn_access_key_v1";
 
 let config = null;
 let authCryptoKey = null;
@@ -36,6 +37,7 @@ unlockBtn.addEventListener("click", async () => {
     const me = await deriveKeys(accessKey);
     currentUser = me.user;
     currentUserEl.textContent = currentUser.username;
+    localStorage.setItem(ACCESS_KEY_STORAGE, accessKey);
     unlocked = true;
     setStatus(unlockStatus, `解锁成功，欢迎 ${currentUser.username}。`, false, true);
     unlockCard.classList.add("hidden");
@@ -63,7 +65,12 @@ refreshBtn.addEventListener("click", async () => {
   await loadNotes(activeEditNoteId);
 });
 
-lockBtn.addEventListener("click", () => {
+lockBtn.addEventListener("click", async () => {
+  try {
+    await authedPost("/api/logout", {}, { useSignature: false });
+  } catch {
+    // ignore logout failure and continue local lock
+  }
   unlocked = false;
   authCryptoKey = null;
   encCryptoKey = null;
@@ -72,6 +79,7 @@ lockBtn.addEventListener("click", () => {
   activeEditNoteId = null;
   currentUserEl.textContent = "-";
   accessKeyInput.value = "";
+  localStorage.removeItem(ACCESS_KEY_STORAGE);
   notesStreamEl.innerHTML = "";
   noteCard.classList.add("hidden");
   unlockCard.classList.remove("hidden");
@@ -86,6 +94,30 @@ async function init() {
   }
   config = await resp.json();
   setStatus(unlockStatus, "输入访问密钥后可读取便签。");
+  await tryAutoLogin();
+}
+
+async function tryAutoLogin() {
+  const savedKey = localStorage.getItem(ACCESS_KEY_STORAGE);
+  if (!savedKey) {
+    return;
+  }
+  try {
+    const me = await deriveKeys(savedKey);
+    currentUser = me.user;
+    currentUserEl.textContent = currentUser.username;
+    unlocked = true;
+    unlockCard.classList.add("hidden");
+    noteCard.classList.remove("hidden");
+    accessKeyInput.value = "";
+    setStatus(unlockStatus, `已自动登录 ${currentUser.username}。`, false, true);
+    await loadNotes();
+  } catch {
+    localStorage.removeItem(ACCESS_KEY_STORAGE);
+    authCryptoKey = null;
+    encCryptoKey = null;
+    setStatus(unlockStatus, "自动登录已失效，请重新输入访问密钥。");
+  }
 }
 
 async function deriveKeys(accessKey) {
@@ -269,22 +301,27 @@ function autoResize(textarea) {
   textarea.style.height = `${next}px`;
 }
 
-async function authedPost(path, body) {
+async function authedPost(path, body, options = {}) {
   const bodyStr = JSON.stringify(body ?? {});
-  const bodyHash = await sha256Hex(bodyStr);
-  const timestamp = String(Date.now());
-  const nonce = crypto.randomUUID();
-  const canonical = `${timestamp}\n${nonce}\nPOST\n${path}\n${bodyHash}`;
-  const signature = await hmacHex(canonical);
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  const useSignature = options.useSignature ?? Boolean(authCryptoKey);
+  if (useSignature) {
+    const bodyHash = await sha256Hex(bodyStr);
+    const timestamp = String(Date.now());
+    const nonce = crypto.randomUUID();
+    const canonical = `${timestamp}\n${nonce}\nPOST\n${path}\n${bodyHash}`;
+    const signature = await hmacHex(canonical);
+    headers["X-Timestamp"] = timestamp;
+    headers["X-Nonce"] = nonce;
+    headers["X-Signature"] = signature;
+  }
 
   const resp = await fetch(path, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Timestamp": timestamp,
-      "X-Nonce": nonce,
-      "X-Signature": signature
-    },
+    credentials: "same-origin",
+    headers,
     body: bodyStr
   });
 

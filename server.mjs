@@ -21,14 +21,19 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const CONFIG_DIR = path.join(__dirname, "config");
 const USERS_FILE = process.env.USERS_FILE_PATH ?? path.join(CONFIG_DIR, "users.json");
 const NOTES_FILE = path.join(DATA_DIR, "notes.json");
+const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
 const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? 8080);
 const MAX_BODY_SIZE = 1024 * 1024;
 const MAX_SKEW_MS = 90_000;
 const NONCE_TTL_MS = 120_000;
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_COOKIE_NAME = "ssn_session";
+const COOKIE_SAME_SITE = "Strict";
 
 const nonceCache = new Map();
+const sessions = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -38,6 +43,7 @@ const MIME_TYPES = {
 };
 
 ensureStorageFiles();
+loadSessionsFromDisk();
 
 console.log(`Users file: ${USERS_FILE}`);
 console.log(`Server listening on http://${HOST}:${PORT}`);
@@ -84,12 +90,33 @@ async function handleApi(req, res, pathname) {
       sendJson(res, 401, { error: "Unauthorized" });
       return;
     }
+    let headers = undefined;
+    if (!auth.sessionId) {
+      const session = createSession(auth.user.id);
+      headers = { "Set-Cookie": buildSessionCookie(session.id, session.expiresAt) };
+    }
     sendJson(res, 200, {
       user: {
         id: auth.user.id,
         username: auth.user.username
       }
-    });
+    }, headers);
+    return;
+  }
+
+  if (pathname === "/api/logout" && req.method === "POST") {
+    const rawBody = await readBody(req);
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (auth?.sessionId) {
+      sessions.delete(auth.sessionId);
+      persistSessionsToDisk();
+    }
+    sendJson(
+      res,
+      200,
+      { success: true },
+      { "Set-Cookie": clearSessionCookie() }
+    );
     return;
   }
 
@@ -255,10 +282,19 @@ function ensureStorageFiles() {
       { encoding: "utf8", mode: 0o600 }
     );
   }
+  if (!fs.existsSync(SESSIONS_FILE)) {
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify({ sessions: [] }, null, 2), "utf8");
+  }
 }
 
 function authorizeRequest(req, pathname, rawBody) {
   cleanupExpiredNonces();
+  cleanupExpiredSessions();
+
+  const bySession = authorizeBySession(req);
+  if (bySession) {
+    return bySession;
+  }
 
   const signature = req.headers["x-signature"];
   const timestamp = req.headers["x-timestamp"];
@@ -309,7 +345,7 @@ function authorizeRequest(req, pathname, rawBody) {
   }
 
   nonceCache.set(nonce, Date.now() + NONCE_TTL_MS);
-  return { user: matchedUser };
+  return { user: matchedUser, sessionId: null };
 }
 
 function readUsersDb() {
@@ -326,6 +362,118 @@ function writeUsersDb(usersDb) {
 
 function isValidAccessKey(value) {
   return typeof value === "string" && value.length >= 16;
+}
+
+function loadSessionsFromDisk() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf8"));
+    if (!parsed || !Array.isArray(parsed.sessions)) {
+      return;
+    }
+    for (const row of parsed.sessions) {
+      if (
+        row &&
+        typeof row.id === "string" &&
+        typeof row.userId === "string" &&
+        typeof row.expiresAt === "number"
+      ) {
+        sessions.set(row.id, row);
+      }
+    }
+  } catch {
+    sessions.clear();
+  }
+  cleanupExpiredSessions();
+}
+
+function persistSessionsToDisk() {
+  fs.writeFileSync(
+    SESSIONS_FILE,
+    JSON.stringify({ sessions: Array.from(sessions.values()) }, null, 2),
+    "utf8"
+  );
+}
+
+function createSession(userId) {
+  const now = Date.now();
+  const session = {
+    id: randomUUID(),
+    userId,
+    createdAt: now,
+    lastSeenAt: now,
+    expiresAt: now + SESSION_TTL_MS
+  };
+  sessions.set(session.id, session);
+  persistSessionsToDisk();
+  return session;
+}
+
+function authorizeBySession(req) {
+  const cookies = parseCookieHeader(req.headers.cookie);
+  const sessionId = cookies[SESSION_COOKIE_NAME];
+  if (!sessionId) {
+    return null;
+  }
+  const existing = sessions.get(sessionId);
+  if (!existing) {
+    return null;
+  }
+  if (existing.expiresAt <= Date.now()) {
+    sessions.delete(sessionId);
+    persistSessionsToDisk();
+    return null;
+  }
+  const usersDb = readUsersDb();
+  const user = usersDb.users.find((x) => x.id === existing.userId);
+  if (!user) {
+    sessions.delete(sessionId);
+    persistSessionsToDisk();
+    return null;
+  }
+  existing.lastSeenAt = Date.now();
+  existing.expiresAt = Date.now() + SESSION_TTL_MS;
+  sessions.set(sessionId, existing);
+  persistSessionsToDisk();
+  return { user, sessionId };
+}
+
+function cleanupExpiredSessions() {
+  const now = Date.now();
+  let changed = false;
+  for (const [id, sess] of sessions.entries()) {
+    if (sess.expiresAt <= now) {
+      sessions.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    persistSessionsToDisk();
+  }
+}
+
+function parseCookieHeader(cookieHeader) {
+  const out = {};
+  if (typeof cookieHeader !== "string" || !cookieHeader) {
+    return out;
+  }
+  const parts = cookieHeader.split(";");
+  for (const part of parts) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    out[key] = decodeURIComponent(value);
+  }
+  return out;
+}
+
+function buildSessionCookie(sessionId, expiresAt) {
+  const maxAge = Math.max(1, Math.floor((expiresAt - Date.now()) / 1000));
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=${COOKIE_SAME_SITE}; Max-Age=${maxAge}`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=${COOKIE_SAME_SITE}; Max-Age=0`;
 }
 
 function readNotesDb() {
@@ -493,16 +641,23 @@ async function serveStatic(res, pathname) {
   sendRaw(res, 200, fileContent, contentType);
 }
 
-function sendJson(res, statusCode, payload) {
-  sendRaw(res, statusCode, Buffer.from(JSON.stringify(payload)), "application/json; charset=utf-8");
+function sendJson(res, statusCode, payload, extraHeaders) {
+  sendRaw(
+    res,
+    statusCode,
+    Buffer.from(JSON.stringify(payload)),
+    "application/json; charset=utf-8",
+    extraHeaders
+  );
 }
 
-function sendRaw(res, statusCode, payload, contentType) {
+function sendRaw(res, statusCode, payload, contentType, extraHeaders) {
   res.writeHead(statusCode, {
     "Content-Type": contentType,
     "Cache-Control": "no-store",
     "Content-Length": Buffer.byteLength(payload),
-    "X-Content-Type-Options": "nosniff"
+    "X-Content-Type-Options": "nosniff",
+    ...(extraHeaders ?? {})
   });
   res.end(payload);
 }
