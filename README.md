@@ -4,6 +4,7 @@
 
 - 通过浏览器访问（HTTP）
 - 服务端仅保存密文
+- 多用户访问（每个用户独立 access-key）
 - 访问需要密钥签名认证
 - 支持基础同步（读取/保存单条便签）
 
@@ -15,34 +16,48 @@ npm start
 
 默认启动在 `http://127.0.0.1:8080`。
 
-首次启动会自动生成访问密钥文件：
+## 2. 用户初始化（SSH 后台）
 
-`config/access-key.txt`
+首次使用请在服务器上添加用户：
 
-你可以通过 SSH 进入服务器后读取该文件，将密钥输入网页进行解锁。
+```bash
+npm run user:add -- --username alice
+```
+
+会输出该用户的 access-key（只显示一次），将它提供给用户登录网页即可。
+
+可选：手动指定密钥
+
+```bash
+npm run user:add -- --username alice --access-key "your_custom_key"
+```
+
+注意：不要执行 `npm add-user`（这是 npm 自带账号命令），本项目请使用 `npm run user:add`。
 
 也可通过环境变量自定义路径：
 
-`ACCESS_KEY_PATH=/path/to/access-key.txt npm start`
+`USERS_FILE_PATH=/path/to/users.json npm start`
 
-## 迁移提示
+用户库默认文件：
 
-若你之前已经在其他位置生成过密钥文件，建议：
+`config/users.json`
 
-1. 关闭服务后确认旧路径密钥是否还在使用
-2. 重新启动服务自动生成 `config/access-key.txt`
-3. 使用新密钥重新登录
-
-## 2. 安全模型
+## 3. 安全模型
 
 实现了以下保护：
 
 - 客户端使用 `AES-GCM` 对便签明文加密后再上传
-- 服务端只存密文 (`data/note.json`)
+- 服务端只存密文（按用户隔离，`data/notes.json`）
 - API 请求使用 `HMAC-SHA256` 签名认证
 - 时间窗校验 + nonce 防重放（短时缓存）
+- 用户的 access-key 保存在 `users.json` 中（由 SSH 后台脚本维护）
 
-## 3. 重要限制（必须阅读）
+## 4. 使用说明
+
+1. 输入 access-key 解锁后，界面会显示当前用户名。
+2. 当前版本每个用户各自有一个同步便签（用户间互不读取）。
+
+## 5. 重要限制（必须阅读）
 
 该项目运行在纯 HTTP 下，无法抵御强主动中间人（MITM）篡改页面/脚本。
 
@@ -56,7 +71,7 @@ npm start
 - 上 HTTPS（自签证书 + 证书固定，或反代 TLS）
 - 或直接放到 WireGuard/Tailscale 等加密隧道内
 
-## 4. 测试
+## 6. 测试
 
 ```bash
 npm test

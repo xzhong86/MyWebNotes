@@ -1,5 +1,4 @@
 import { createServer, STATUS_CODES } from "node:http";
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,9 +17,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
-const NOTE_FILE = path.join(DATA_DIR, "note.json");
-const DEFAULT_KEY_DIR = path.join(__dirname, "config");
-const ACCESS_KEY_FILE = process.env.ACCESS_KEY_PATH ?? path.join(DEFAULT_KEY_DIR, "access-key.txt");
+const CONFIG_DIR = path.join(__dirname, "config");
+const USERS_FILE = process.env.USERS_FILE_PATH ?? path.join(CONFIG_DIR, "users.json");
+const NOTES_FILE = path.join(DATA_DIR, "notes.json");
 
 const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? 8080);
@@ -37,11 +36,9 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8"
 };
 
-ensureDataFiles();
-const accessKey = getOrCreateAccessKey();
-const authKey = deriveAuthKey(accessKey);
+ensureStorageFiles();
 
-console.log(`Access key file: ${ACCESS_KEY_FILE}`);
+console.log(`Users file: ${USERS_FILE}`);
 console.log(`Server listening on http://${HOST}:${PORT}`);
 
 const server = createServer(async (req, res) => {
@@ -79,20 +76,38 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
-  if (pathname === "/api/note/get" && req.method === "POST") {
+  if (pathname === "/api/me" && req.method === "POST") {
     const rawBody = await readBody(req);
-    if (!isAuthorized(req, pathname, rawBody)) {
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
       sendJson(res, 401, { error: "Unauthorized" });
       return;
     }
-    const note = readNoteFile();
+    sendJson(res, 200, {
+      user: {
+        id: auth.user.id,
+        username: auth.user.username
+      }
+    });
+    return;
+  }
+
+  if (pathname === "/api/note/get" && req.method === "POST") {
+    const rawBody = await readBody(req);
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
+      sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+    const note = readNoteForUser(auth.user.id);
     sendJson(res, 200, { note });
     return;
   }
 
   if (pathname === "/api/note/put" && req.method === "POST") {
     const rawBody = await readBody(req);
-    if (!isAuthorized(req, pathname, rawBody)) {
+    const auth = authorizeRequest(req, pathname, rawBody);
+    if (!auth) {
       sendJson(res, 401, { error: "Unauthorized" });
       return;
     }
@@ -119,7 +134,7 @@ async function handleApi(req, res, pathname) {
       return;
     }
 
-    const current = readNoteFile();
+    const current = readNoteForUser(auth.user.id);
     const next = {
       ciphertext: parsed.ciphertext,
       iv: parsed.iv,
@@ -127,7 +142,7 @@ async function handleApi(req, res, pathname) {
       version: current.version + 1
     };
 
-    fs.writeFileSync(NOTE_FILE, JSON.stringify(next, null, 2), "utf8");
+    writeNoteForUser(auth.user.id, next);
     sendJson(res, 200, { note: next });
     return;
   }
@@ -135,35 +150,26 @@ async function handleApi(req, res, pathname) {
   sendJson(res, 404, { error: "Not found" });
 }
 
-function ensureDataFiles() {
+function ensureStorageFiles() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(NOTE_FILE)) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!fs.existsSync(NOTES_FILE)) {
     fs.writeFileSync(
-      NOTE_FILE,
-      JSON.stringify({ ciphertext: "", iv: "", updatedAt: 0, version: 0 }, null, 2),
+      NOTES_FILE,
+      JSON.stringify({ byUser: {} }, null, 2),
       "utf8"
+    );
+  }
+  if (!fs.existsSync(USERS_FILE)) {
+    fs.writeFileSync(
+      USERS_FILE,
+      JSON.stringify({ version: 1, users: [] }, null, 2),
+      { encoding: "utf8", mode: 0o600 }
     );
   }
 }
 
-function getOrCreateAccessKey() {
-  fs.mkdirSync(path.dirname(ACCESS_KEY_FILE), { recursive: true });
-  if (fs.existsSync(ACCESS_KEY_FILE)) {
-    const value = fs.readFileSync(ACCESS_KEY_FILE, "utf8").trim();
-    if (value.length >= 16) {
-      return value;
-    }
-  }
-  const generated = randomBytes(32).toString("hex");
-  fs.writeFileSync(ACCESS_KEY_FILE, generated, { encoding: "utf8", mode: 0o600 });
-  return generated;
-}
-
-function readNoteFile() {
-  return JSON.parse(fs.readFileSync(NOTE_FILE, "utf8"));
-}
-
-function isAuthorized(req, pathname, rawBody) {
+function authorizeRequest(req, pathname, rawBody) {
   cleanupExpiredNonces();
 
   const signature = req.headers["x-signature"];
@@ -171,20 +177,20 @@ function isAuthorized(req, pathname, rawBody) {
   const nonce = req.headers["x-nonce"];
 
   if (typeof signature !== "string" || typeof timestamp !== "string" || typeof nonce !== "string") {
-    return false;
+    return null;
   }
 
   const ts = Number(timestamp);
   if (!Number.isFinite(ts)) {
-    return false;
+    return null;
   }
 
   if (Math.abs(Date.now() - ts) > MAX_SKEW_MS) {
-    return false;
+    return null;
   }
 
   if (nonceCache.has(nonce)) {
-    return false;
+    return null;
   }
 
   const bodyHash = computeBodyHash(rawBody);
@@ -195,15 +201,66 @@ function isAuthorized(req, pathname, rawBody) {
     path: pathname,
     bodyHash
   });
-  const expected = signRequest(authKey, canonical);
-  const valid = verifySignature(expected, signature);
+  const usersDb = readUsersDb();
+  let matchedUser = null;
 
-  if (!valid) {
-    return false;
+  for (const user of usersDb.users) {
+    if (!isValidAccessKey(user.accessKey)) {
+      continue;
+    }
+    const authKey = deriveAuthKey(user.accessKey);
+    const expected = signRequest(authKey, canonical);
+    if (verifySignature(expected, signature)) {
+      matchedUser = user;
+      break;
+    }
+  }
+
+  if (!matchedUser) {
+    return null;
   }
 
   nonceCache.set(nonce, Date.now() + NONCE_TTL_MS);
-  return true;
+  return { user: matchedUser };
+}
+
+function readUsersDb() {
+  const parsed = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.users)) {
+    throw new Error("Invalid users DB format");
+  }
+  return parsed;
+}
+
+function writeUsersDb(usersDb) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(usersDb, null, 2), { encoding: "utf8", mode: 0o600 });
+}
+
+function isValidAccessKey(value) {
+  return typeof value === "string" && value.length >= 16;
+}
+
+function readNotesDb() {
+  const parsed = JSON.parse(fs.readFileSync(NOTES_FILE, "utf8"));
+  if (!parsed || typeof parsed !== "object" || typeof parsed.byUser !== "object" || parsed.byUser === null) {
+    throw new Error("Invalid notes DB format");
+  }
+  return parsed;
+}
+
+function emptyNote() {
+  return { ciphertext: "", iv: "", updatedAt: 0, version: 0 };
+}
+
+function readNoteForUser(userId) {
+  const notesDb = readNotesDb();
+  return notesDb.byUser[userId] ?? emptyNote();
+}
+
+function writeNoteForUser(userId, note) {
+  const notesDb = readNotesDb();
+  notesDb.byUser[userId] = note;
+  fs.writeFileSync(NOTES_FILE, JSON.stringify(notesDb, null, 2), "utf8");
 }
 
 function cleanupExpiredNonces() {

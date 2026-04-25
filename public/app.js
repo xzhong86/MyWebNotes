@@ -8,6 +8,7 @@ const noteText = document.getElementById("note-text");
 const saveBtn = document.getElementById("save-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const lockBtn = document.getElementById("lock-btn");
+const currentUserEl = document.getElementById("current-user");
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -16,6 +17,7 @@ let config = null;
 let authCryptoKey = null;
 let encCryptoKey = null;
 let unlocked = false;
+let currentUser = null;
 
 init().catch((error) => {
   setStatus(unlockStatus, `初始化失败: ${error.message}`, true);
@@ -29,9 +31,11 @@ unlockBtn.addEventListener("click", async () => {
   }
 
   try {
-    await deriveKeys(accessKey);
+    const me = await deriveKeys(accessKey);
+    currentUser = me.user;
+    currentUserEl.textContent = currentUser.username;
     unlocked = true;
-    setStatus(unlockStatus, "解锁成功，正在加载便签...", false, true);
+    setStatus(unlockStatus, `解锁成功，欢迎 ${currentUser.username}。`, false, true);
     unlockCard.classList.add("hidden");
     noteCard.classList.remove("hidden");
     await loadNote();
@@ -65,6 +69,8 @@ lockBtn.addEventListener("click", () => {
   unlocked = false;
   authCryptoKey = null;
   encCryptoKey = null;
+  currentUser = null;
+  currentUserEl.textContent = "-";
   noteText.value = "";
   accessKeyInput.value = "";
   noteCard.classList.add("hidden");
@@ -114,7 +120,7 @@ async function deriveKeys(accessKey) {
     ["encrypt", "decrypt"]
   );
 
-  await authedPost("/api/note/get", {});
+  return authedPost("/api/me", {});
 }
 
 async function loadNote() {

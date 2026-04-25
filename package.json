@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "add-user": "node scripts/add-user.mjs",
+    "user:add": "node scripts/add-user.mjs",
     "test": "node --test"
   }
 }

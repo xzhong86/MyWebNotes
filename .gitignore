@@ -1,4 +1,4 @@
 node_modules
 data/note.json
-data/access-key.txt
-config/access-key.txt
+data/notes.json
+config/users.json
