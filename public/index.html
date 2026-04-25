@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Note Sync</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="card" id="unlock-card">
+        <h1>Secure Note Sync</h1>
+        <p class="muted">输入服务器密钥后解锁。密钥可通过 SSH 到服务器查看。</p>
+        <label for="access-key">访问密钥</label>
+        <input id="access-key" type="password" placeholder="请输入访问密钥" autocomplete="off" />
+        <button id="unlock-btn" type="button">解锁</button>
+        <p id="unlock-status" class="status"></p>
+      </section>
+
+      <section class="card hidden" id="note-card">
+        <div class="toolbar">
+          <h2>私密便签</h2>
+          <div class="toolbar-actions">
+            <button id="refresh-btn" type="button">刷新</button>
+            <button id="save-btn" type="button">保存</button>
+            <button id="lock-btn" type="button">锁定</button>
+          </div>
+        </div>
+        <textarea id="note-text" placeholder="输入便签内容..."></textarea>
+        <p id="note-status" class="status"></p>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
