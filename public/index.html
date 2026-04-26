@@ -10,11 +10,14 @@
     <main class="app-shell">
       <section class="card" id="unlock-card">
         <h1>Simple Secure Notes</h1>
-        <p class="muted">BruceZ的简易Web云便签。输入服务器密钥后解锁。</p>
+        <p class="muted">BruceZ的简易Web云便签。</p>
+        <p>输入用户密钥后解锁，或联系管理员添加用户。</p>
         <label for="access-key">访问密钥</label>
         <input id="access-key" type="password" placeholder="请输入访问密钥" autocomplete="off" />
-        <button id="unlock-btn" type="button">解锁</button>
-        <p id="unlock-status" class="status"></p>
+        <div class="unlock-footer">
+          <p id="unlock-status" class="status"></p>
+          <button id="unlock-btn" type="button">解锁</button>
+        </div>
       </section>
 
       <section class="card hidden" id="note-card">

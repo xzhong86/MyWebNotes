@@ -48,6 +48,13 @@ unlockBtn.addEventListener("click", async () => {
   }
 });
 
+accessKeyInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    unlockBtn.click();
+  }
+});
+
 createNoteBtn.addEventListener("click", async () => {
   if (!unlocked) return;
   try {

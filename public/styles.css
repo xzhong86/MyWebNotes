@@ -106,8 +106,17 @@ button.danger:hover {
   background: #a93333;
 }
 
-#unlock-btn {
+.unlock-footer {
   margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.unlock-footer .status {
+  margin: 0;
+  flex: 1;
 }
 
 .topbar {
@@ -204,6 +213,10 @@ button.danger:hover {
   .topbar,
   .note-card-footer {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .unlock-footer {
     align-items: stretch;
   }
 
