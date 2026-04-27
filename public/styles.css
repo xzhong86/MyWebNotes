@@ -169,11 +169,19 @@ button.danger:hover {
   gap: 8px;
 }
 
+.note-actions button {
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
 .note-editor {
   min-height: 120px;
+  max-height: 320px;
   resize: none;
   line-height: 1.45;
   background: #fff;
+  overflow-y: auto;
 }
 
 .note-editor:disabled {

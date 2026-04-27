@@ -13,6 +13,9 @@ const notesStreamEl = document.getElementById("notes-stream");
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 const ACCESS_KEY_STORAGE = "ssn_access_key_v1";
+const NOTE_EDITOR_MIN_HEIGHT = 120;
+const NOTE_EDITOR_MAX_HEIGHT = 320;
+const PLAIN_COMPRESS_THRESHOLD_BYTES = 2048;
 
 let config = null;
 let authCryptoKey = null;
@@ -175,9 +178,7 @@ async function loadNotes(preferredEditId = null) {
     const loaded = [];
     for (let i = 0; i < detailResponses.length; i += 1) {
       const note = detailResponses[i].note;
-      const plaintext = note.ciphertext
-        ? await decryptText({ ciphertext: note.ciphertext, iv: note.iv })
-        : "";
+      const plaintext = note.ciphertext ? await decryptAndDecodeNote(note) : "";
       loaded.push({ ...note, plaintext });
     }
 
@@ -283,13 +284,18 @@ function renderNotes() {
 async function saveNote(noteId, plaintext) {
   try {
     setStatus(noteStatus, "保存中...");
-    const encrypted = await encryptText(plaintext);
+    const encoded = await encodePlaintext(plaintext);
+    const encrypted = await encryptBytes(encoded.bytes);
     const payload = await authedPost("/api/notes/put", {
       noteId,
       ciphertext: encrypted.ciphertext,
       iv: encrypted.iv,
+      plainCompression: encoded.plainCompression,
       updatedAt: Date.now()
     });
+    if (!payload?.note || typeof payload.note.id !== "string") {
+      throw new Error("服务器返回了无效便签数据");
+    }
 
     const idx = notes.findIndex((x) => x.id === noteId);
     if (idx >= 0) {
@@ -304,7 +310,10 @@ async function saveNote(noteId, plaintext) {
 
 function autoResize(textarea) {
   textarea.style.height = "auto";
-  const next = Math.max(120, textarea.scrollHeight);
+  const next = Math.min(
+    NOTE_EDITOR_MAX_HEIGHT,
+    Math.max(NOTE_EDITOR_MIN_HEIGHT, textarea.scrollHeight)
+  );
   textarea.style.height = `${next}px`;
 }
 
@@ -339,9 +348,8 @@ async function authedPost(path, body, options = {}) {
   return payload;
 }
 
-async function encryptText(text) {
+async function encryptBytes(plainBytes) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plainBytes = enc.encode(text);
   const cipherBuffer = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     encCryptoKey,
@@ -362,6 +370,58 @@ async function decryptText({ iv, ciphertext }) {
     cipherBytes
   );
   return dec.decode(plainBuffer);
+}
+
+async function decryptBytes({ iv, ciphertext }) {
+  const ivBytes = fromBase64(iv);
+  const cipherBytes = fromBase64(ciphertext);
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: ivBytes },
+    encCryptoKey,
+    cipherBytes
+  );
+  return new Uint8Array(plainBuffer);
+}
+
+async function decryptAndDecodeNote(note) {
+  const rawBytes = await decryptBytes({ iv: note.iv, ciphertext: note.ciphertext });
+  const plainCompression = note.plainCompression === "gzip" ? "gzip" : "none";
+  const decoded = plainCompression === "gzip" ? await gunzipBytes(rawBytes) : rawBytes;
+  return dec.decode(decoded);
+}
+
+async function encodePlaintext(text) {
+  const plainBytes = enc.encode(text);
+  if (plainBytes.length < PLAIN_COMPRESS_THRESHOLD_BYTES) {
+    return { bytes: plainBytes, plainCompression: "none" };
+  }
+  if (typeof CompressionStream === "undefined") {
+    return { bytes: plainBytes, plainCompression: "none" };
+  }
+  try {
+    const gzipped = await gzipBytes(plainBytes);
+    if (gzipped.length < plainBytes.length) {
+      return { bytes: gzipped, plainCompression: "gzip" };
+    }
+  } catch {
+    // fallback to plain storage
+  }
+  return { bytes: plainBytes, plainCompression: "none" };
+}
+
+async function gzipBytes(bytes) {
+  const compressedStream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+  const compressedBuffer = await new Response(compressedStream).arrayBuffer();
+  return new Uint8Array(compressedBuffer);
+}
+
+async function gunzipBytes(bytes) {
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("当前浏览器不支持 gzip 解压");
+  }
+  const decompressedStream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const decompressedBuffer = await new Response(decompressedStream).arrayBuffer();
+  return new Uint8Array(decompressedBuffer);
 }
 
 async function hmacHex(message) {

@@ -172,6 +172,7 @@ async function handleApi(req, res, pathname) {
     const note = {
       id: randomUUID(),
       ciphertext: "",
+      plainCompression: "none",
       iv: "",
       createdAt: now,
       updatedAt: now,
@@ -203,6 +204,7 @@ async function handleApi(req, res, pathname) {
       !parsed.noteId ||
       typeof parsed.ciphertext !== "string" ||
       typeof parsed.iv !== "string" ||
+      !isValidPlainCompression(parsed.plainCompression) ||
       typeof parsed.updatedAt !== "number"
     ) {
       sendJson(res, 400, { error: "Missing or invalid fields" });
@@ -222,6 +224,7 @@ async function handleApi(req, res, pathname) {
     const next = {
       ...current,
       ciphertext: parsed.ciphertext,
+      plainCompression: parsed.plainCompression,
       iv: parsed.iv,
       updatedAt: parsed.updatedAt,
       version: current.version + 1
@@ -543,13 +546,25 @@ function summarizeNotes(notes) {
     }));
 }
 
+function isValidPlainCompression(value) {
+  return value === "none" || value === "gzip";
+}
+
 function normalizeUserNotes(value, userId) {
   if (!value || typeof value !== "object") {
     return { changed: true, value: { notes: [] } };
   }
   if (Array.isArray(value.notes)) {
-    const notes = value.notes.filter(isValidNoteRecord);
-    return { changed: notes.length !== value.notes.length, value: { notes } };
+    const notes = value.notes
+      .filter(isValidNoteRecord)
+      .map((note) => ({
+        ...note,
+        plainCompression: isValidPlainCompression(note.plainCompression) ? note.plainCompression : "none"
+      }));
+    const changed =
+      notes.length !== value.notes.length ||
+      notes.some((note, idx) => note.plainCompression !== value.notes[idx]?.plainCompression);
+    return { changed, value: { notes } };
   }
   if (
     typeof value.ciphertext === "string" &&
@@ -566,6 +581,7 @@ function normalizeUserNotes(value, userId) {
           {
             id: `legacy-${userId}`,
             ciphertext: value.ciphertext,
+            plainCompression: "none",
             iv: value.iv,
             createdAt: value.updatedAt || Date.now(),
             updatedAt: value.updatedAt || Date.now(),
@@ -584,6 +600,7 @@ function isValidNoteRecord(note) {
     typeof note === "object" &&
     typeof note.id === "string" &&
     typeof note.ciphertext === "string" &&
+    (note.plainCompression === undefined || isValidPlainCompression(note.plainCompression)) &&
     typeof note.iv === "string" &&
     typeof note.createdAt === "number" &&
     typeof note.updatedAt === "number" &&

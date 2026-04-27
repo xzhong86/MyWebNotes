@@ -67,6 +67,7 @@ npm run user:del -- -u alice
 实现了以下保护：
 
 - 客户端使用 `AES-GCM` 对便签明文加密后再上传
+- 明文超过 2KB 时，客户端会先 `gzip` 压缩再加密，并在 `notes.json` 记录 `plainCompression` 字段
 - 服务端只存密文（按用户隔离，`data/notes.json`）
 - API 请求使用 `HMAC-SHA256` 签名认证
 - 时间窗校验 + nonce 防重放（短时缓存）
