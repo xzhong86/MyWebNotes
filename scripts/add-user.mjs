@@ -11,7 +11,7 @@ const USERS_FILE = process.env.USERS_FILE_PATH ?? path.join(CONFIG_DIR, "users.j
 
 const args = parseArgs(process.argv.slice(2));
 const username = args.username;
-const accessKey = args.accessKey || randomBytes(32).toString("hex");
+const accessKey = args.accessKey || randomBytes(24).toString("hex");
 
 if (!username) {
   console.error("Usage: node scripts/add-user.mjs -u <name> [-k <key>]");

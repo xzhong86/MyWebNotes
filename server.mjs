@@ -20,7 +20,7 @@ const DATA_DIR = path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const CONFIG_DIR = path.join(__dirname, "config");
 const USERS_FILE = process.env.USERS_FILE_PATH ?? path.join(CONFIG_DIR, "users.json");
-const NOTES_FILE = path.join(DATA_DIR, "notes.json");
+const NOTES_DIR = process.env.NOTES_DIR_PATH ?? path.join(DATA_DIR, "notes");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -271,13 +271,7 @@ async function handleApi(req, res, pathname) {
 function ensureStorageFiles() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  if (!fs.existsSync(NOTES_FILE)) {
-    fs.writeFileSync(
-      NOTES_FILE,
-      JSON.stringify({ byUser: {} }, null, 2),
-      "utf8"
-    );
-  }
+  fs.mkdirSync(NOTES_DIR, { recursive: true });
   if (!fs.existsSync(USERS_FILE)) {
     fs.writeFileSync(
       USERS_FILE,
@@ -479,28 +473,51 @@ function clearSessionCookie() {
   return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=${COOKIE_SAME_SITE}; Max-Age=0`;
 }
 
-function readNotesDb() {
-  const parsed = JSON.parse(fs.readFileSync(NOTES_FILE, "utf8"));
-  if (!parsed || typeof parsed !== "object" || typeof parsed.byUser !== "object" || parsed.byUser === null) {
-    throw new Error("Invalid notes DB format");
-  }
-  return parsed;
-}
-
 function readNotesForUser(userId) {
-  const notesDb = readNotesDb();
-  const normalized = normalizeUserNotes(notesDb.byUser[userId], userId);
+  const filePath = getUserNotesFilePath(userId);
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    throw new Error(`Invalid user notes file: ${filePath}`);
+  }
+  const normalized = normalizeUserNotes(parsed);
   if (normalized.changed) {
-    notesDb.byUser[userId] = normalized.value;
-    fs.writeFileSync(NOTES_FILE, JSON.stringify(notesDb, null, 2), "utf8");
+    writeUserNotesFile(filePath, normalized.value);
   }
   return normalized.value.notes;
 }
 
 function writeNotesForUser(userId, notes) {
-  const notesDb = readNotesDb();
-  notesDb.byUser[userId] = { notes };
-  fs.writeFileSync(NOTES_FILE, JSON.stringify(notesDb, null, 2), "utf8");
+  const filePath = getUserNotesFilePath(userId);
+  writeUserNotesFile(filePath, { notes });
+}
+
+function writeUserNotesFile(filePath, payload) {
+  const tempPath = `${filePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+  fs.renameSync(tempPath, filePath);
+}
+
+function getUserNotesFilePath(userId) {
+  if (!isValidUserIdForFilename(userId)) {
+    throw new Error("Invalid user id for notes storage");
+  }
+  return path.join(NOTES_DIR, `${userId}.json`);
+}
+
+function isValidUserIdForFilename(userId) {
+  return typeof userId === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(userId);
+}
+
+function deleteNotesFileForUser(userId) {
+  const filePath = getUserNotesFilePath(userId);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
 }
 
 function readNoteById(userId, noteId) {
@@ -550,7 +567,7 @@ function isValidPlainCompression(value) {
   return value === "none" || value === "gzip";
 }
 
-function normalizeUserNotes(value, userId) {
+function normalizeUserNotes(value) {
   if (!value || typeof value !== "object") {
     return { changed: true, value: { notes: [] } };
   }
@@ -565,31 +582,6 @@ function normalizeUserNotes(value, userId) {
       notes.length !== value.notes.length ||
       notes.some((note, idx) => note.plainCompression !== value.notes[idx]?.plainCompression);
     return { changed, value: { notes } };
-  }
-  if (
-    typeof value.ciphertext === "string" &&
-    typeof value.iv === "string" &&
-    typeof value.updatedAt === "number"
-  ) {
-    if (!value.ciphertext) {
-      return { changed: true, value: { notes: [] } };
-    }
-    return {
-      changed: true,
-      value: {
-        notes: [
-          {
-            id: `legacy-${userId}`,
-            ciphertext: value.ciphertext,
-            plainCompression: "none",
-            iv: value.iv,
-            createdAt: value.updatedAt || Date.now(),
-            updatedAt: value.updatedAt || Date.now(),
-            version: value.version || 1
-          }
-        ]
-      }
-    };
   }
   return { changed: true, value: { notes: [] } };
 }

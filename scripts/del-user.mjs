@@ -10,7 +10,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const CONFIG_DIR = path.join(ROOT_DIR, "config");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const USERS_FILE = process.env.USERS_FILE_PATH ?? path.join(CONFIG_DIR, "users.json");
-const NOTES_FILE = process.env.NOTES_FILE_PATH ?? path.join(DATA_DIR, "notes.json");
+const NOTES_DIR = process.env.NOTES_DIR_PATH ?? path.join(DATA_DIR, "notes");
 
 const args = parseArgs(process.argv.slice(2));
 const username = args.username;
@@ -40,13 +40,14 @@ if (index < 0) {
 }
 
 const target = usersDb.users[index];
-const hasNotes = hasUserNotes(target.id);
+const userNotesFile = getUserNotesFilePath(target.id);
+const hasNotes = fs.existsSync(userNotesFile);
 
 const rl = readline.createInterface({ input, output });
 try {
   console.log(`About to delete user '${target.username}' (id=${target.id}).`);
   if (hasNotes) {
-    console.log("This will also delete this user's notes from notes.json.");
+    console.log("This will also delete this user's notes file.");
   }
   const answer = await rl.question(`Type DELETE to confirm deleting '${target.username}': `);
   if (answer.trim() !== "DELETE") {
@@ -60,28 +61,24 @@ try {
 usersDb.users.splice(index, 1);
 writeJsonFile(USERS_FILE, usersDb);
 
-if (fs.existsSync(NOTES_FILE)) {
-  const notesDb = readJsonFile(NOTES_FILE, "notes.json");
-  if (!notesDb.byUser || typeof notesDb.byUser !== "object") {
-    console.error("Invalid notes.json format");
-    process.exit(1);
-  }
-  if (Object.prototype.hasOwnProperty.call(notesDb.byUser, target.id)) {
-    delete notesDb.byUser[target.id];
-    writeJsonFile(NOTES_FILE, notesDb);
-  }
+if (fs.existsSync(userNotesFile)) {
+  fs.unlinkSync(userNotesFile);
 }
 
 console.log(`Deleted user: ${target.username}`);
 console.log(`Users file: ${USERS_FILE}`);
-console.log(`Notes file: ${NOTES_FILE}`);
+console.log(`Notes file: ${userNotesFile}`);
 
-function hasUserNotes(userId) {
-  if (!fs.existsSync(NOTES_FILE)) {
-    return false;
+function getUserNotesFilePath(userId) {
+  if (!isValidUserIdForFilename(userId)) {
+    console.error("Invalid user id for notes file");
+    process.exit(1);
   }
-  const notesDb = readJsonFile(NOTES_FILE, "notes.json");
-  return Boolean(notesDb.byUser && Object.prototype.hasOwnProperty.call(notesDb.byUser, userId));
+  return path.join(NOTES_DIR, `${userId}.json`);
+}
+
+function isValidUserIdForFilename(userId) {
+  return typeof userId === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(userId);
 }
 
 function readJsonFile(filePath, label) {

@@ -1,4 +1,4 @@
 node_modules
 data/note.json
-data/notes.json
+data/notes/
 config/users.json
