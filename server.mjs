@@ -28,7 +28,7 @@ const PORT = Number(process.env.PORT ?? 8080);
 const MAX_BODY_SIZE = 1024 * 1024;
 const MAX_SKEW_MS = 90_000;
 const NONCE_TTL_MS = 120_000;
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
 const SESSION_COOKIE_NAME = "ssn_session";
 const COOKIE_SAME_SITE = "Strict";
 

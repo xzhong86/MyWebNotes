@@ -98,6 +98,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.success,
+button.success:disabled {
+  background: var(--ok);
+  cursor: default;
+}
+
 button.danger {
   background: #c73f3f;
 }

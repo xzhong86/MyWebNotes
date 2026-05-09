@@ -16,6 +16,7 @@ const ACCESS_KEY_STORAGE = "ssn_access_key_v1";
 const NOTE_EDITOR_MIN_HEIGHT = 120;
 const NOTE_EDITOR_MAX_HEIGHT = 320;
 const PLAIN_COMPRESS_THRESHOLD_BYTES = 2048;
+const COPY_FEEDBACK_MS = 2000;
 
 let config = null;
 let authCryptoKey = null;
@@ -224,6 +225,10 @@ function renderNotes() {
     const actions = document.createElement("div");
     actions.className = "note-actions";
 
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.textContent = "复制";
+
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.textContent = isEditing ? "编辑中" : "编辑";
@@ -244,6 +249,7 @@ function renderNotes() {
     deleteBtn.textContent = "删除";
     deleteBtn.className = "danger";
 
+    actions.appendChild(copyBtn);
     actions.appendChild(editBtn);
     actions.appendChild(saveBtn);
     actions.appendChild(deleteBtn);
@@ -258,6 +264,16 @@ function renderNotes() {
 
     saveBtn.addEventListener("click", async () => {
       await saveNote(note.id, textarea.value);
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await copyTextToClipboard(textarea.value);
+        showCopySuccess(copyBtn);
+        setStatus(noteStatus, `已复制便签 ${i + 1} 的内容。`, false, true);
+      } catch (error) {
+        setStatus(noteStatus, `复制失败: ${error.message}`, true);
+      }
     });
 
     deleteBtn.addEventListener("click", async () => {
@@ -278,6 +294,43 @@ function renderNotes() {
     notesStreamEl.appendChild(card);
 
     autoResize(textarea);
+  }
+}
+
+function showCopySuccess(button) {
+  button.textContent = "已复制";
+  button.classList.add("success");
+  button.disabled = true;
+
+  window.setTimeout(() => {
+    button.textContent = "复制";
+    button.classList.remove("success");
+    button.disabled = false;
+  }, COPY_FEEDBACK_MS);
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const scratch = document.createElement("textarea");
+  scratch.value = text;
+  scratch.setAttribute("readonly", "");
+  scratch.style.position = "fixed";
+  scratch.style.top = "-1000px";
+  scratch.style.opacity = "0";
+  document.body.appendChild(scratch);
+  scratch.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("当前浏览器不允许访问剪贴板");
+    }
+  } finally {
+    document.body.removeChild(scratch);
   }
 }
 
